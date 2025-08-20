@@ -9,7 +9,7 @@ from gemini import ForkliftAssessment, analyze_forklift
 class DeepSeekJudge:
     def __init__(self):
         self.client = OpenAI(
-            api_key="sk-700484d042f84726957b0b041f2b33d4",
+            api_key="api-kry",
             base_url="https://api.deepseek.com"
         )
         
