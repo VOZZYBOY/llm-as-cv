@@ -21,9 +21,13 @@ class ForkliftAssessment(BaseModel):
     other_breakdowns: int = Field(description="другие поломки: 0=есть поломки, 1=нет поломок")
     photo_rules: int = Field(description="правила сьемки: 0=не соблюдены, 1=соблюдены")
 
-API_KEY = "Api-key"
+class ValidationResult(BaseModel):
+    is_valid: bool = Field(description="Валидность изображений для анализа погрузчика")
+    confidence: float = Field(description="Уверенность в оценке от 0.0 до 1.0")
+
+API_KEY = "AIzaSyB0IwBAFTcnrQDKQUhmkwXSomXMAGUhImY"
 MODEL_NAME = "gemini-2.5-pro"
-VALIDATION_MODEL = "gemini-2.5-flash"
+VALIDATION_MODEL = "gemini-2.5-flash-lite"
 
 client = OpenAI(
     api_key=API_KEY,
@@ -75,13 +79,14 @@ mirrors (Наличие боковых зеркал или 1 панорамно�
 - 0 = Mirror is missing or shattered/damaged beyond use
 
 lights (Передние и задние фары исправны, целы):
-- 1 = Lights are mounted, lens intact, secure mounting
-- 0 = Light missing, broken lens, hanging loose, clearly non-functional
+IMPORTANT: Lights must be CLEAN and INTACT for safe operation
+- 1 = Lights are mounted, lenses intact, NOT completely covered with dirt, light can pass through
+- 0 = Light is missing, broken, or COMPLETELY covered with dirt (light cannot pass through)
 
 seat (сиденье):
-THINK: Look at the operator seat condition. Examine for damage, wear, or safety issues.
-- 1 = Seat is in usable condition (may show normal wear but structurally sound)
-- 0 = Seat has significant damage: large tears, broken mounting, unsafe to use, or missing
+IMPORTANT: Seat must be PRESENT and WITHOUT SERIOUS DAMAGE
+- 1 = Seat EXISTS and is usable (minor wear acceptable, main thing - not torn and not broken)
+- 0 = Seat is MISSING, has large holes/tears, or broken mounting
 
 roof (Целая крыша, где есть):
 - 1 = ROPS/roof structure is present and not deformed, maintains structural integrity
@@ -103,18 +108,12 @@ other_breakdowns (другие поломки):
 - 1 = No visible fluid leaks, forks are straight, mast is aligned, no obvious mechanical issues
 - 0 = Oil/hydraulic leaks, bent forks, misaligned mast, visible mechanical damage
 
-photo_rules (правила сьемки):
-THINK: Evaluate the technical quality of ALL 4 photographs for proper assessment.
-- 1 = High quality photos: sharp focus, good lighting balance, no overexposure/underexposure, all important forklift parts clearly visible, no motion blur
-- 0 = Poor quality photos: blurry/out of focus, too dark or too bright (overexposed/underexposed), important parts obscured, motion blur, glare that prevents assessment
+photo_rules (Photo Quality Assessment):
+THINK: Evaluate the technical quality of ALL 4 photographs for assessment capability.
+- 1 = Acceptable photo quality: Images may have minor blur but details are clearly visible, adequate resolution to see forklift components, lighting allows proper assessment, can distinguish between parts and their condition
+- 0 = Unacceptable photo quality: ONLY if severely blurred throughout, extremely poor resolution making it difficult to identify what's happening, cannot distinguish forklift details due to image quality issues, lighting so poor that assessment is impossible
 
-IMPORTANT PHOTO QUALITY CRITERIA:
-- Sharp focus on forklift details
-- Proper lighting (not too dark, not overexposed)
-- No motion blur
-- No glare or reflections that hide components
-- Forklift fully visible in frame
-- Can clearly assess all safety components
+IMPORTANT: Only mark as 0 if photo quality genuinely prevents technical assessment of the forklift condition.
 
 FINAL REMINDER: For each component, especially the seat:
 1. Look carefully at ALL 4 photos
@@ -156,34 +155,21 @@ def prepare_images_for_openai(image_paths: List[str]) -> List[dict]:
 
     return images
 
-def validate_forklift_images(image_paths: List[str]) -> dict:
+def validate_forklift_images(image_paths: List[str]) -> ValidationResult:
     images = prepare_images_for_openai(image_paths)
     
-    validation_prompt = """
-    You are a visual content validator for industrial equipment analysis.
-    
-    Your task: Analyze these images and determine if they show a FORKLIFT suitable for technical assessment.
-    
-    Check for:
-    1. Is this clearly a forklift/lift truck/industrial lifting vehicle?
-    2. Are the images clear enough for technical assessment?
-    3. Is the forklift the main subject (not just background)?
-    4. Are these photos suitable for condition evaluation?
-    
-    Reject if:
-    - Not a forklift (other vehicles, equipment, people, etc.)
-    - Images too blurry, dark, or unclear
-    - Forklift only partially visible or in background
-    - Photos unsuitable for technical assessment
-    
-    Return JSON 
-    """
+    validation_prompt = """Analyze these images to determine if they show a FORKLIFT suitable for technical assessment.
+
+Check:
+1. Is this clearly a forklift/lift truck/industrial lifting vehicle?
+2. Are images clear enough for technical assessment?
+3. Is the forklift the main subject?
+4. Are photos suitable for condition evaluation?
+
+Set is_valid to true only if all criteria are met.
+Set confidence based on image quality and clarity (0.0 to 1.0)."""
     
     messages = [
-        {
-            "role": "system", 
-            "content": "You are a visual content validator. Return only valid JSON."
-        },
         {
             "role": "user",
             "content": [
@@ -192,20 +178,26 @@ def validate_forklift_images(image_paths: List[str]) -> dict:
         }
     ]
     
-    response = client.chat.completions.create(
+    response = client.beta.chat.completions.parse(
         model=VALIDATION_MODEL,
         messages=messages,
+        response_format=ValidationResult,
         temperature=0.1,
-        max_tokens=1000,
-        response_format={"type": "json_object"}
+        max_tokens=100
     )
     
-    return json.loads(response.choices[0].message.content)
+    result = response.choices[0].message.parsed
+    if result is None:
+        return ValidationResult(is_valid=True, confidence=0.5)
+    
+    return result
 
 def analyze_forklift(image_paths: List[str]) -> ForkliftAssessment:
     validation_result = validate_forklift_images(image_paths)
     
-    if not validation_result['is_valid']:
+    print(f"{validation_result.is_valid} (conf: {validation_result.confidence:.2f})")
+    
+    if not validation_result.is_valid:
         return ForkliftAssessment(
             cleanliness=0,
             paint_condition=0, 
