@@ -25,7 +25,7 @@ class ValidationResult(BaseModel):
     is_valid: bool = Field(description="Валидность изображений для анализа погрузчика")
     confidence: float = Field(description="Уверенность в оценке от 0.0 до 1.0")
 
-API_KEY = "AIzaSyB0IwBAFTcnrQDKQUhmkwXSomXMAGUhImY"
+API_KEY = "API-KEY"
 MODEL_NAME = "gemini-2.5-pro"
 VALIDATION_MODEL = "gemini-2.5-flash-lite"
 
