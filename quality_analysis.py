@@ -26,14 +26,7 @@ class QualityAnalyzer:
         try:
             df = pd.read_csv(self.ground_truth_csv, encoding='utf-8')
             return df
-            
-            df.columns = ['id', 'Чистота', 'Окрашен без потертостей', 'зеркала', 'фары', 
-                         'сиденье', 'крыша', 'стекло', 'Шины', 'Поломка', 'съемка']
-            
-            print(f"Загружено {len(df)} эталонных записей")
-            return df
         except Exception as e:
-            print(f"Ошибка загрузки CSV: {e}")
             return pd.DataFrame()
     
     def find_forklift_images(self, forklift_id: str) -> List[str]:
@@ -190,15 +183,13 @@ class QualityAnalyzer:
             return {}
         
         results = []
-        print(f"Тестирование стабильности на погрузчике {forklift_id} ({num_runs} запусков)")
         
         for run in range(num_runs):
             try:
                 assessment = analyze_forklift(images)
                 results.append(assessment.model_dump())
-                print(f"Запуск {run + 1}/{num_runs} выполнен")
             except Exception as e:
-                print(f"Запуск {run + 1}/{num_runs} ошибка: {e}")
+                pass
         
         if len(results) < 2:
             return {"error": "Недостаточно данных для анализа стабильности"}
@@ -237,7 +228,6 @@ class QualityAnalyzer:
         Returns:
             Полный отчет о качестве
         """
-        print("Запуск полного анализа качества модели")
         
         # Загрузка эталонных данных
         ground_truth_df = self.load_ground_truth()
@@ -252,16 +242,12 @@ class QualityAnalyzer:
         failed_assessments = []
         latencies = []  # Добавляем список для времени выполнения
         
-        print(f"Анализ {len(ground_truth_df)} погрузчиков")
-        
         for idx, row in ground_truth_df.iterrows():
             forklift_id = str(int(float(row.iloc[0])))  # Преобразуем float в int, затем в string
-            print(f"Анализирую погрузчик {forklift_id} ({idx + 1}/{len(ground_truth_df)})")
             
             # Поиск изображений
             images = self.find_forklift_images(forklift_id)
             if not images:
-                print(f"Нет изображений для погрузчика {forklift_id}")
                 continue
             
             try:
@@ -272,7 +258,6 @@ class QualityAnalyzer:
                 
                 latency = end_time - start_time
                 latencies.append(latency)
-                print(f"Время анализа: {latency:.2f}с")
                 
                 # Сравнение с эталоном
                 ground_truth_dict = row.to_dict()
@@ -280,7 +265,6 @@ class QualityAnalyzer:
                 comparisons.append(comparison)
                 
             except Exception as e:
-                print(f"Ошибка анализа {forklift_id}: {e}")
                 failed_assessments.append(forklift_id)
         
         # Расчет метрик
@@ -312,43 +296,12 @@ class QualityAnalyzer:
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(metrics, f, ensure_ascii=False, indent=2)
         
-        # Консольный отчет
-        print("\n" + "="*60)
-        print("ОТЧЕТ О КАЧЕСТВЕ МОДЕЛИ")
-        print("="*60)
-        
-        if 'overall_accuracy' in metrics:
-            print(f"Общая точность: {metrics['overall_accuracy']:.2%}")
-            print(f"Успешность анализа: {metrics.get('success_rate', 0):.2%}")
-        
-        if 'field_accuracy' in metrics:
-            print("\nТочность по параметрам:")
-            for field, stats in metrics['field_accuracy'].items():
-                accuracy = stats['accuracy']
-                status = "OK" if accuracy > 0.8 else "WARN" if accuracy > 0.6 else "FAIL"
-                print(f"[{status}] {field}: {accuracy:.2%} ({stats['correct']}/{stats['total']})")
-        
-        if 'error_analysis' in metrics:
-            print("\nАнализ ошибок:")
-            for field, errors in metrics['error_analysis'].items():
-                if errors['total_errors'] > 0:
-                    fp_rate = errors['false_positives'] / errors['total_errors']
-                    fn_rate = errors['false_negatives'] / errors['total_errors']
-                    print(f"{field}: {errors['total_errors']} ошибок")
-                    print(f"  Ложные срабатывания: {fp_rate:.1%}")
-                    print(f"  Пропуски: {fn_rate:.1%}")
-        
-        if 'latency_metrics' in metrics:
-            lat = metrics['latency_metrics']
-            print("\nПроизводительность:")
-            print(f"Среднее время: {lat['avg_latency']:.2f}с")
-            print(f"Минимальное время: {lat['min_latency']:.2f}с") 
-            print(f"Максимальное время: {lat['max_latency']:.2f}с")
-            print(f"95-й перцентиль: {lat['p95_latency']:.2f}с")
-            print(f"99-й перцентиль: {lat['p99_latency']:.2f}с")
-            print(f"Стд. отклонение: {lat['std_latency']:.2f}с")
-        
-        print(f"\nПодробный отчет сохранен в: {output_file}")
+        return {
+            "overall_accuracy": metrics.get('overall_accuracy', 0),
+            "success_rate": metrics.get('success_rate', 0),
+            "total_forklifts": len(metrics.get('field_accuracy', {})),
+            "output_file": output_file
+        }
 
 def main():
     """Основная функция для запуска анализа"""

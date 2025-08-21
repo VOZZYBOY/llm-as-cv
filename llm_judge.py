@@ -121,19 +121,12 @@ Evaluate accuracy of each parameter, identify critical errors (safety-related), 
         critical_errors_count = 0
         
         for forklift_id in forklift_ids:
-            print(f"Analyzing forklift {forklift_id} with DeepSeek judge...")
             result = self.analyze_forklift_with_judge(forklift_id)
             
             if "error" not in result:
                 results.append(result)
                 total_score += result["judge_evaluation"]["overall_score"]
                 critical_errors_count += len(result["judge_evaluation"]["critical_errors"])
-                
-                print(f"  Score: {result['judge_evaluation']['overall_score']:.2f}")
-                if result["judge_evaluation"]["critical_errors"]:
-                    print(f"  Critical errors: {len(result['judge_evaluation']['critical_errors'])}")
-            else:
-                print(f"  Error: {result['error']}")
         
         avg_score = total_score / len(results) if results else 0
         
@@ -148,63 +141,50 @@ Evaluate accuracy of each parameter, identify critical errors (safety-related), 
 
 def main():
     judge = DeepSeekJudge()
-    print("1. Judge single forklift")
-    print("2. Batch judge multiple forklifts")
-    print("3. Judge all available forklifts")
     
-    choice = input("Choose mode (1-3): ").strip()
+    import sys
+    if len(sys.argv) < 2:
+        return
     
-    if choice == "1":
-        forklift_id = input("Enter forklift ID: ").strip()
+    choice = sys.argv[1]
+    
+    if choice == "single":
+        if len(sys.argv) < 3:
+            return
+        forklift_id = sys.argv[2]
         result = judge.analyze_forklift_with_judge(forklift_id)
-        
-        print(f"\nJudgment for forklift {forklift_id}:")
-        print("=" * 40)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
         
         output_file = f"judge_result_{forklift_id}.json"
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
-        print(f"\nResult saved to: {output_file}")
         
-    elif choice == "2":
-        ids_input = input("Enter forklift IDs separated by commas: ").strip()
-        forklift_ids = [id.strip() for id in ids_input.split(",")]
+        return result
+        
+    elif choice == "batch":
+        if len(sys.argv) < 3:
+            return
+        forklift_ids = sys.argv[2].split(",")
         
         summary = judge.batch_judge_analysis(forklift_ids)
-        
-        print(f"\nBatch Analysis Summary:")
-        print("=" * 40)
-        print(f"Total analyzed: {summary['total_analyzed']}")
-        print(f"Average score: {summary['average_score']:.2f}")
-        print(f"Critical errors: {summary['total_critical_errors']}")
         
         output_file = "batch_judge_results.json"
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(summary, f, ensure_ascii=False, indent=2)
-        print(f"\nResults saved to: {output_file}")
         
-    elif choice == "3":
+        return summary
+        
+    elif choice == "all":
         testcup_path = Path("testCUP")
         forklift_folders = [f.name for f in testcup_path.iterdir() if f.is_dir()]
         forklift_folders.sort(key=lambda x: int(x) if x.isdigit() else float('inf'))
         
-        print(f"Found {len(forklift_folders)} forklifts")
-        confirm = input("Analyze all? (y/n): ").strip().lower()
+        summary = judge.batch_judge_analysis(forklift_folders)
         
-        if confirm == 'y':
-            summary = judge.batch_judge_analysis(forklift_folders)
-            
-            print(f"\nComplete Analysis Summary:")
-            print("=" * 40)
-            print(f"Total analyzed: {summary['total_analyzed']}")
-            print(f"Average score: {summary['average_score']:.2f}")
-            print(f"Critical errors: {summary['total_critical_errors']}")
-            
-            output_file = "complete_judge_analysis.json"
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(summary, f, ensure_ascii=False, indent=2)
-            print(f"\nResults saved to: {output_file}")
+        output_file = "complete_judge_analysis.json"
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        
+        return summary
 
 if __name__ == "__main__":
     main()

@@ -4,7 +4,6 @@ import json
 import base64
 from pathlib import Path
 from typing import List, Optional
-from PIL import Image
 
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -25,7 +24,7 @@ class ValidationResult(BaseModel):
     is_valid: bool = Field(description="Валидность изображений для анализа погрузчика")
     confidence: float = Field(description="Уверенность в оценке от 0.0 до 1.0")
 
-API_KEY = "API-KEY"
+API_KEY = "AIzaSyD-uk8r54wjpIeOB7eIyZPubpHpsv3oeKg"
 MODEL_NAME = "gemini-2.5-pro"
 VALIDATION_MODEL = "gemini-2.5-flash-lite"
 
@@ -124,6 +123,7 @@ Return only the JSON object with these 10 fields, no additional text or formatti
 
 """
 
+
 def load_image_as_base64(image_path: str) -> str:
     with open(image_path, 'rb') as f:
         return base64.b64encode(f.read()).decode('utf-8')
@@ -185,7 +185,20 @@ Set confidence based on image quality and clarity (0.0 to 1.0)."""
         temperature=0.1,
         max_tokens=100
     )
-    
+
+    usage = response.usage
+    forklift_id = Path(image_paths[0]).parent.name if image_paths else None
+    rec = {
+        "model": VALIDATION_MODEL,
+        "stage": "validation", 
+        "forklift_id": forklift_id,
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "total_tokens": usage.total_tokens
+    }
+    with open("usage_log.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
     result = response.choices[0].message.parsed
     if result is None:
         return ValidationResult(is_valid=True, confidence=0.5)
@@ -194,8 +207,6 @@ Set confidence based on image quality and clarity (0.0 to 1.0)."""
 
 def analyze_forklift(image_paths: List[str]) -> ForkliftAssessment:
     validation_result = validate_forklift_images(image_paths)
-    
-    print(f"{validation_result.is_valid} (conf: {validation_result.confidence:.2f})")
     
     if not validation_result.is_valid:
         return ForkliftAssessment(
@@ -236,6 +247,19 @@ def analyze_forklift(image_paths: List[str]) -> ForkliftAssessment:
         reasoning_effort="high"
     )
 
+    usage = response.usage
+    forklift_id = Path(image_paths[0]).parent.name if image_paths else None
+    rec = {
+        "model": MODEL_NAME,
+        "stage": "analysis",
+        "forklift_id": forklift_id,
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "total_tokens": usage.total_tokens
+    }
+    with open("usage_log.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
     result = response.choices[0].message.parsed
     if result is None:
         return ForkliftAssessment(
@@ -259,6 +283,7 @@ def display_results(assessment: ForkliftAssessment):
         'photo_rules': 'правила сьемки'  
     }
 
+    results = {}
     for field, label in fields.items():
         value = getattr(assessment, field)
         if value == 1:
@@ -269,7 +294,8 @@ def display_results(assessment: ForkliftAssessment):
             status = "Отсутствует"
         else:
             status = "Неизвестно"
-        print(f"   {label}: {status}")
+        results[label] = status
+    return results
 
 def get_forklift_photos(forklift_id: str) -> List[str]:
     folder_path = Path(f"testCUP/{forklift_id}")
@@ -297,7 +323,10 @@ def main():
             return
         
         assessment = analyze_forklift(photo_paths)
-        display_results(assessment)
+        results = display_results(assessment)
+        
+        for label, status in results.items():
+            print(f"   {label}: {status}")
         
         output_file = f"forklift_{forklift_id}_assessment.json"
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -312,7 +341,10 @@ def main():
         ]
         
         assessment = analyze_forklift(photo_paths)
-        display_results(assessment)
+        results = display_results(assessment)
+        
+        for label, status in results.items():
+            print(f"   {label}: {status}")
         
         with open("forklift_assessment_result.json", 'w', encoding='utf-8') as f:
             json.dump(assessment.model_dump(), f, ensure_ascii=False, indent=2)
@@ -334,10 +366,6 @@ def batch_analyze_all_forklifts():
     
     forklift_folders = [f for f in testcup_path.iterdir() if f.is_dir()]
     forklift_folders.sort(key=lambda x: int(x.name) if x.name.isdigit() else float('inf'))
-    
-    confirm = input("Выполнить анализ всех погрузчиков? (y/n): ").strip().lower()
-    if confirm != 'y':
-        return
     
     all_results = []
     
